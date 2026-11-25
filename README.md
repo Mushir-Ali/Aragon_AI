@@ -19,6 +19,36 @@ npm install && npx prisma migrate dev && npm run dev
 cd client && npm install && npm run dev
 ```
 
+### Environment variables
+
+`server/.env` — see `.env.example`:
+
+```dotenv
+PORT=4000
+CLIENT_ORIGIN=http://localhost:5173
+
+# Supabase → Connect → ORM → Prisma gives you both of these.
+# DATABASE_URL is pooled (app queries), DIRECT_URL is direct (migrations run
+# through the pooler fail, so Prisma needs the direct connection).
+DATABASE_URL="postgresql://postgres.xxxx:PASSWORD@aws-0-region.pooler.supabase.com:6543/postgres?pgbouncer=true"
+DIRECT_URL="postgresql://postgres.xxxx:PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres"
+
+# Supabase → Settings → API Keys. The secret key is server-side only —
+# it bypasses row-level security and must never reach the browser.
+SUPABASE_URL="https://xxxx.supabase.co"
+SUPABASE_SERVICE_KEY="sb_secret_..."
+SUPABASE_BUCKET="uploads"
+```
+
+`client` needs one variable, set in Vercel:
+
+```dotenv
+VITE_API_URL=https://your-api.onrender.com
+```
+
+Anything prefixed `VITE_` is compiled into the browser bundle, so only
+non-secret values go there.
+
 ## How it works
 
 1. `POST /api/uploads` streams files to object storage, writes an `Image` row per file with
