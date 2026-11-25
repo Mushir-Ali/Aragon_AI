@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ImageStatus {
+  PENDING
+  PROCESSING
+  ACCEPTED
+  REJECTED
+}
+
+enum RejectionReason {
+  TOO_SMALL
+  INVALID_FORMAT
+  DUPLICATE
+  BLURRY
+  FACE_TOO_SMALL
+  MULTIPLE_FACES
+  PROCESSING_ERROR
+}
+
+model Upload {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  images    Image[]
+}
+
+model Image {
+  id       String @id @default(cuid())
+  uploadId String
+  upload   Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  width        Int?
+  height       Int?
+
+  // Key of the file as uploaded; convertedKey is set when HEIC is converted to JPEG.
+  storageKey   String  @unique
+  convertedKey String?
+
+  status          ImageStatus      @default(PENDING)
+  rejectionReason RejectionReason?
+  rejectionDetail String?
+
+  // Validation outputs, kept so results are explainable and re-checkable.
+  perceptualHash String?
+  blurScore      Float?
+  faceCount      Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // The gallery always queries "images in this upload, by status".
+  @@index([uploadId, status])
+  // Duplicate detection looks up by hash; without this it is a full scan.
+  @@index([perceptualHash])
+}
