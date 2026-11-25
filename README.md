@@ -1,41 +1,80 @@
 # Photo upload and validation
 
-Users upload photos; each one is validated asynchronously and sorted into **Accepted** or **Rejected**
-with a specific reason.
+Users upload photos; each one is validated asynchronously and sorted into **Accepted** or
+**Rejected** with a specific reason.
 
-Live: _TBD_ · Walkthrough: _TBD_
+**Live:** _URL_ · **API:** _URL_/api/health · **Walkthrough:** _Loom link_
 
 ## Stack
 
-| Layer | Choice |
-| --- | --- |
-| Frontend | React + TypeScript + Tailwind (Vite) |
-| Backend | Node + Express + TypeScript |
-| Database | PostgreSQL (Supabase) via Prisma |
-| Object storage | Supabase Storage (S3-equivalent) |
-| Image processing | sharp, heic-convert |
+React + TypeScript + Tailwind (Vite) · Node + Express + TypeScript · PostgreSQL via Prisma ·
+Supabase Storage · sharp + heic-convert
 
 ## Running locally
 
 ```bash
-# server
 cd server && cp .env.example .env   # fill in Supabase values
-npm install
-npx prisma migrate dev
-npm run dev                          # http://localhost:4000/api/health
+npm install && npx prisma migrate dev && npm run dev
 
-# client
-cd client && npm install && npm run dev   # http://localhost:5173
+cd client && npm install && npm run dev
 ```
+
+## How it works
+
+1. `POST /api/uploads` streams files to object storage, writes an `Image` row per file with
+   status `PENDING`, and returns **202 + uploadId immediately**.
+2. A background processor validates each image in turn and updates its row.
+3. The client polls `GET /api/uploads/:id` every 1.5s until nothing is pending, then renders
+   the Accepted and Rejected sections.
+
+The API never blocks on image processing, which is what makes the upload feel instant even
+when validation takes seconds per file.
 
 ## Key decisions
 
-_TBD — filled in as the build progresses._
+- **Polling over WebSockets.** Jobs here are slow, not chatty. Polling survives a refresh and a
+  flaky connection with zero extra infrastructure. At scale this becomes SSE or a socket.
+- **Validation order is cheapest-first and short-circuits.** Format (magic bytes) → size →
+  blur → duplicate → faces. There's no point running a Laplacian on a file that isn't an image.
+- **Never trust the client's MIME type.** Browsers routinely send HEIC as
+  `application/octet-stream`, and a content type is trivially spoofed, so the real format comes
+  from the file header. The frontend check is a fast courtesy; the server check is the real one.
+- **Storage keys are generated server-side** (`<uploadId>/<nanoid><ext>`), so a client can never
+  influence a path we write to.
+- **Storage behind an interface.** Supabase today; swapping to S3 touches one file and no routes.
+- **Blur = variance of the Laplacian**, implemented directly rather than pulling in OpenCV. A
+  sharp image has strong local intensity changes; a blurry one is locally flat. The threshold
+  (100) was tuned by hand against test photos and is the most arbitrary number in the project.
+- **Duplicates = dHash + Hamming distance.** A 64-bit perceptual hash survives resizing and
+  re-compression, so near-identical photos collide while genuinely different ones don't.
+  Distance ≤ 10 counts as a duplicate.
+- **Indexes chosen from the query plan**, not habit: `(uploadId, status)` because the gallery
+  always asks "images in this upload, by status", and `perceptualHash` because duplicate
+  detection looks up by hash and would otherwise be a full scan on every upload.
+- **Processing is sequential, deliberately.** Decoding and convolution are CPU-bound; running
+  them in parallel on one Node process makes every image slower.
+
+## What I cut, and why
+
+- **Face detection (rules 5 and 6).** Implemented against a `detectFaces` interface and wired
+  into the pipeline, but the detector itself is stubbed. A real one means face-api.js plus
+  TensorFlow and model downloads, which wasn't a safe use of a 90-minute budget. It returns
+  `null` — *not evaluated* — rather than silently passing, so the behaviour is honest.
+- **Auth and per-user ownership.** Anyone with an upload id can read it. Ids are unguessable,
+  but it's not access control.
+- **A real queue.** Background work runs in the web process; see below.
 
 ## Known issues
 
-_TBD_
+- Background processing lives in the API process, so a restart mid-upload leaves images stuck
+  in `PROCESSING`.
+- No rate limiting on the upload endpoint.
+- Duplicate detection compares within a single upload, not across all history.
+- The storage bucket is public for simplicity; production would use signed URLs.
 
 ## Next steps
 
-_TBD_
+- **A day:** BullMQ worker on Redis so processing survives restarts and gets retries and
+  concurrency limits; rate limiting; signed URLs instead of a public bucket.
+- **A week:** real face detection; presigned direct-to-S3 uploads so files never pass through
+  the API; cross-upload duplicate detection via a hash index; thumbnail generation for the grid.
