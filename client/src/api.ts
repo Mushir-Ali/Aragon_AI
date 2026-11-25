@@ -1,3 +1,6 @@
+// Empty in dev (the Vite proxy forwards /api); the Render URL in production.
+const API = import.meta.env.VITE_API_URL ?? "";
+
 export type ImageStatus = "PENDING" | "PROCESSING" | "ACCEPTED" | "REJECTED";
 
 export type ImageDto = {
@@ -28,9 +31,14 @@ export async function uploadPhotos(files: File[]): Promise<UploadDto> {
   const form = new FormData();
   // No Content-Type header: the browser must set the multipart boundary itself.
   files.forEach((f) => form.append("photos", f));
-  return json<UploadDto>(await fetch("/api/uploads", { method: "POST", body: form }));
+  return json<UploadDto>(await fetch(`${API}/api/uploads`, { method: "POST", body: form }));
 }
 
 export async function getUpload(id: string): Promise<UploadDto> {
-  return json<UploadDto>(await fetch(`/api/uploads/${id}`));
+  return json<UploadDto>(await fetch(`${API}/api/uploads/${id}`));
+}
+
+export async function deleteImage(uploadId: string, imageId: string): Promise<void> {
+  const res = await fetch(`${API}/api/uploads/${uploadId}/images/${imageId}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 204) throw new Error("Could not remove image");
 }

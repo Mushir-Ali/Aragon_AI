@@ -99,6 +99,24 @@ uploadsRouter.get("/:id", async (req, res) => {
   });
 });
 
+// DELETE /api/uploads/:uploadId/images/:id — remove an image and its stored files.
+uploadsRouter.delete("/:uploadId/images/:id", async (req, res) => {
+  const image = await prisma.image.findFirst({
+    where: { id: req.params.id, uploadId: req.params.uploadId },
+  });
+  if (!image) {
+    res.status(404).json({ error: "Image not found" });
+    return;
+  }
+
+  // Storage first: a failed delete here must not leave an orphaned row.
+  await storage.remove(image.storageKey);
+  if (image.convertedKey) await storage.remove(image.convertedKey);
+  await prisma.image.delete({ where: { id: image.id } });
+
+  res.status(204).end();
+});
+
 // Shape the client sees: no storage keys, no internal columns.
 function toDto(image: {
   id: string;
